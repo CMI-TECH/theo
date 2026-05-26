@@ -1,15 +1,10 @@
 /**
- * Live CEFIS API client
+ * Live CEFIS API client — sem autenticação necessária
  *
- * Auth resolution order:
- *  1. CEFIS_API_KEY  — pre-obtained key (preferred for Vercel deploys)
- *  2. CEFIS_EMAIL + CEFIS_PASSWORD — auto-login on first call, key cached in memory
- *
- * API v1 base: https://cefis.com.br
- * API v3 base: https://api-v3.cefis.com.br  (courses, tracks, lessons)
+ * API v3 base: https://api-v3.cefis.com.br  (cursos, trilhas, aulas)
+ * Todos os endpoints de catálogo são públicos (HTTP 200 sem Authorization).
  */
 
-const V1 = "https://cefis.com.br";
 const V3 = "https://api-v3.cefis.com.br";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -35,47 +30,7 @@ export interface CefisLesson {
   videoUrl?: string;
 }
 
-// ── API key ───────────────────────────────────────────────────────────────────
-
-let _key: string | null = null;
-
-async function getKey(): Promise<string | null> {
-  if (_key) return _key;
-
-  const direct = process.env.CEFIS_API_KEY;
-  if (direct) {
-    _key = direct;
-    return _key;
-  }
-
-  const email = process.env.CEFIS_EMAIL;
-  const pass  = process.env.CEFIS_PASSWORD;
-  if (!email || !pass) {
-    console.warn("[cefis-api] No CEFIS_API_KEY or CEFIS_EMAIL/PASSWORD set — running without CEFIS integration");
-    return null;
-  }
-
-  try {
-    const r = await fetch(`${V1}/api/v1/login`, {
-      method : "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body   : JSON.stringify({ email, pass }),
-    });
-    if (!r.ok) {
-      console.error("[cefis-api] Login failed:", r.status, await r.text());
-      return null;
-    }
-    const d = await r.json();
-    _key = (d?.data?.key as string) ?? null;
-    if (_key) console.log("[cefis-api] API key obtained via login");
-    return _key;
-  } catch (err) {
-    console.error("[cefis-api] Login error:", err);
-    return null;
-  }
-}
-
-// ── Simple in-memory cache (survives warm Vercel invocations) ─────────────────
+// ── In-memory cache (survives warm Vercel invocations) ────────────────────────
 
 const _cache = new Map<string, { v: unknown; t: number }>();
 const TTL    = 60 * 60 * 1000; // 1 hour
@@ -90,13 +45,10 @@ async function withCache<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 // ── Public helpers ─────────────────────────────────────────────────────────────
 
-/** Search the CEFIS course catalog. Returns [] gracefully if API is unavailable. */
+/** Busca cursos do catálogo CEFIS por texto. Retorna [] se a API estiver fora. */
 export async function searchCourses(query: string, limit = 8): Promise<CefisCourse[]> {
   const cacheKey = `courses:${query.slice(0, 100)}:${limit}`;
   return withCache(cacheKey, async () => {
-    const key = await getKey();
-    if (!key) return [];
-
     const url = new URL(`${V3}/courses`);
     url.searchParams.set("search",         query.slice(0, 200));
     url.searchParams.set("count",          String(limit));
@@ -104,7 +56,7 @@ export async function searchCourses(query: string, limit = 8): Promise<CefisCour
     url.searchParams.set("orderDirection", "desc");
 
     const r = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+      headers: { Accept: "application/json" },
     });
     if (!r.ok) {
       console.error("[cefis-api] Course search failed:", r.status);
@@ -115,14 +67,11 @@ export async function searchCourses(query: string, limit = 8): Promise<CefisCour
   });
 }
 
-/** Fetch lessons for a course (with video URLs). Returns [] gracefully. */
+/** Busca as aulas de um curso com URLs de vídeo. Retorna [] se indisponível. */
 export async function getCourseLessons(courseId: number): Promise<CefisLesson[]> {
   return withCache(`lessons:${courseId}`, async () => {
-    const key = await getKey();
-    if (!key) return [];
-
     const r = await fetch(`${V3}/courses/${courseId}/lessons`, {
-      headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+      headers: { Accept: "application/json" },
     });
     if (!r.ok) return [];
 
@@ -146,23 +95,24 @@ export async function getCourseLessons(courseId: number): Promise<CefisLesson[]>
   });
 }
 
-/** Check if the CEFIS API is reachable and the key is valid. */
+/** Verifica se a API está acessível. Usado pelo /api/debug. */
 export async function pingCefisApi(): Promise<{ ok: boolean; status: string }> {
   try {
-    const key = await getKey();
-    if (!key) return { ok: false, status: "no API key configured" };
-
     const r = await fetch(`${V3}/courses?count=1`, {
-      headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+      headers: { Accept: "application/json" },
     });
-    if (r.ok) return { ok: true, status: "✅ connected" };
+    if (r.ok) {
+      const d = await r.json();
+      const total = d?.pagination?.totalItems ?? "?";
+      return { ok: true, status: `✅ connected — ${total} cursos no catálogo` };
+    }
     return { ok: false, status: `❌ HTTP ${r.status}` };
   } catch (err) {
     return { ok: false, status: `❌ ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
-/** Format courses + lessons into a prompt-friendly string for the system prompt. */
+/** Formata cursos + aulas em string para o system prompt. */
 export function formatCoursesForPrompt(
   courses: CefisCourse[],
   lessonsMap: Map<number, CefisLesson[]>
