@@ -7,7 +7,7 @@ import { MessageBubble } from "./MessageBubble";
 import { InputBar } from "./InputBar";
 
 const CEFIS_LOGO =
-  "https://fjasnwkpvcpzwapxxhvy.supabase.co/storage/v1/object/public/logo/logo%2001.png";
+  "https://fjasnwkpvcpzwapxxhvy.supabase.co/storage/v1/object/public/logo/LOGO%20CREFIS.png";
 
 interface Props {
   messages: ChatMessage[];

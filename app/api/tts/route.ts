@@ -47,8 +47,12 @@ export async function POST(request: NextRequest) {
 
   if (!elevenRes.ok) {
     const errText = await elevenRes.text();
-    console.error("ElevenLabs error:", elevenRes.status, errText);
-    return Response.json({ error: "Erro no TTS" }, { status: 502 });
+    console.error("[tts] ElevenLabs error:", elevenRes.status, errText);
+    const hint = elevenRes.status === 401 ? "API key inválida"
+               : elevenRes.status === 422 ? "Voice ID inválido"
+               : elevenRes.status === 429 ? "Limite ElevenLabs atingido"
+               : `Erro ${elevenRes.status}`;
+    return Response.json({ error: hint, detail: errText }, { status: 502 });
   }
 
   const audioBuffer = await elevenRes.arrayBuffer();
