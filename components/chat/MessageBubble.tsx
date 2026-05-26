@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import type { ChatMessage } from "@/lib/types";
 
 const CEFIS_LOGO =
-  "https://fjasnwkpvcpzwapxxhvy.supabase.co/storage/v1/object/public/logo/logo%2001.png";
+  "https://fjasnwkpvcpzwapxxhvy.supabase.co/storage/v1/object/public/logo/LOGO%20CREFIS.png";
 
 interface Props {
   message: ChatMessage;
@@ -492,8 +492,8 @@ export function MessageBubble({ message, isStreaming, studentId }: Props) {
 
   return (
     <div className="flex justify-start mb-3">
-      {/* CEFIS logo avatar */}
-      <div className="w-7 h-7 rounded-full overflow-hidden bg-white border border-gray-200 flex-shrink-0 mr-2.5 mt-0.5 shadow-sm">
+      {/* CEFIS logo avatar — dark bg so white logo is visible */}
+      <div className="w-7 h-7 rounded-full overflow-hidden bg-[#0d2137] border border-gray-200 flex-shrink-0 mr-2.5 mt-0.5 shadow-sm">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={CEFIS_LOGO}
