@@ -1,27 +1,13 @@
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+// Server-side Supabase client for Route Handlers and Server Components.
+// This app does not use Supabase Auth, so cookie-based session management
+// is unnecessary — and using cookies() from next/headers inside Route Handlers
+// on Vercel causes "Dynamic server usage" errors. We use the anon key directly.
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 export async function createClient() {
-  const cookieStore = await cookies();
-
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          } catch {
-            // Route Handlers can set cookies; Server Components cannot
-          }
-        },
-      },
-    }
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url) throw new Error("NEXT_PUBLIC_SUPABASE_URL is not set");
+  if (!key) throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY is not set");
+  return createSupabaseClient(url, key);
 }

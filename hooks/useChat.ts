@@ -32,7 +32,7 @@ export function useChat(studentId: string) {
 
     async function loadHistory() {
       try {
-        const [{ data: msgs }, { data: topicsData }] = await Promise.all([
+        const [msgsResult, topicsResult] = await Promise.all([
           supabase
             .from("messages")
             .select("role, content")
@@ -44,11 +44,19 @@ export function useChat(studentId: string) {
             .eq("student_id", studentId),
         ]);
 
-        if (msgs && msgs.length > 0) {
-          setMessages(msgs as ChatMessage[]);
+        if (msgsResult.error) {
+          console.error("[useChat] messages query error:", msgsResult.error.code, msgsResult.error.message);
+        } else {
+          console.log("[useChat] messages loaded:", msgsResult.data?.length ?? 0);
+          if (msgsResult.data && msgsResult.data.length > 0) {
+            setMessages(msgsResult.data as ChatMessage[]);
+          }
         }
-        if (topicsData && topicsData.length > 0) {
-          setTopics(topicsData as Topic[]);
+
+        if (topicsResult.error) {
+          console.error("[useChat] topics query error:", topicsResult.error.code, topicsResult.error.message);
+        } else if (topicsResult.data && topicsResult.data.length > 0) {
+          setTopics(topicsResult.data as Topic[]);
         }
       } catch (err) {
         console.error("[useChat] Failed to load history:", err);

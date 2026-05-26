@@ -1,5 +1,9 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+
+// Force dynamic rendering — prevents Vercel from trying to statically optimise
+// this route, which would strip the runtime environment variables.
+export const dynamic = "force-dynamic";
 import { createClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { buildSystemPrompt } from "@/lib/theo-system-prompt";
@@ -174,7 +178,7 @@ async function handleChat(request: NextRequest) {
             { student_id, role: "user", content: message.trim() },
             { student_id, role: "assistant", content: cleanResponse },
           ]);
-          if (msgError) console.error("[chat] save messages error:", msgError.message);
+          if (msgError) console.error("[chat] save messages error:", msgError.code, msgError.message, msgError.details);
 
           if (Object.keys(topics).length > 0) {
             const upserts = Object.entries(topics).map(([name, score]) => ({
