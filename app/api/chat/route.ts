@@ -29,11 +29,30 @@ function stripTopics(text: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  try {
+    return await handleChat(request);
+  } catch (err) {
+    // Top-level catch — any unhandled sync/async throw ends up here instead of a blank 500
+    const name    = err instanceof Error ? err.name    : "UnknownError";
+    const message = err instanceof Error ? err.message : String(err);
+    const stack   = err instanceof Error ? err.stack   : undefined;
+    console.error("[chat] UNHANDLED TOP-LEVEL ERROR", { name, message, stack });
+    return Response.json({ error: message, name, stack }, { status: 500 });
+  }
+}
+
+async function handleChat(request: NextRequest) {
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     "127.0.0.1";
 
-  console.log(`[chat] ENV check — THEO_ANTHROPIC_API_KEY=${process.env.THEO_ANTHROPIC_API_KEY ? "SET" : "UNDEFINED"}`);
+  // ── ENV diagnostics ──────────────────────────────────────────────────────
+  console.log("[chat] ENV", {
+    THEO_ANTHROPIC_API_KEY : process.env.THEO_ANTHROPIC_API_KEY  ? "SET" : "MISSING",
+    SUPABASE_URL           : process.env.NEXT_PUBLIC_SUPABASE_URL ? "SET" : "MISSING",
+    SUPABASE_ANON_KEY      : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "SET" : "MISSING",
+    NODE_ENV               : process.env.NODE_ENV,
+  });
 
   const { allowed } = checkRateLimit(ip, 20, 60_000);
   if (!allowed) {
@@ -43,6 +62,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // ── Parse body ───────────────────────────────────────────────────────────
+  console.log("[chat] step: parsing body");
   const body = await request.json().catch(() => null);
   if (!body) {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
@@ -57,7 +78,6 @@ export async function POST(request: NextRequest) {
   if (!message?.trim()) {
     return Response.json({ error: "Mensagem vazia" }, { status: 400 });
   }
-
   if (!student_id) {
     return Response.json({ error: "student_id ausente" }, { status: 400 });
   }
@@ -70,8 +90,8 @@ export async function POST(request: NextRequest) {
     { role: "user" as const, content: message.trim() },
   ];
 
-  // Build a search query from all user messages to find relevant CEFIS courses
-  // Wrapped in try/catch — data/ dir may be absent in deploy (gitignored)
+  // ── Course search (optional — data/ may be absent on deploy) ─────────────
+  console.log("[chat] step: course search");
   let coursesContext: string | undefined;
   try {
     const allUserText = [
@@ -83,10 +103,14 @@ export async function POST(request: NextRequest) {
       relevantCourses.length > 0
         ? formatCoursesForPrompt(relevantCourses, true)
         : undefined;
+    console.log("[chat] courses found:", relevantCourses.length);
   } catch (err) {
-    console.warn("[chat] Course search failed (data dir absent?), continuing without courses:", err);
+    console.warn("[chat] Course search failed, continuing without courses:", err);
     coursesContext = undefined;
   }
+
+  // ── System prompt ────────────────────────────────────────────────────────
+  console.log("[chat] step: building system prompt");
   const today = new Date().toLocaleDateString("pt-BR", {
     weekday: "long",
     day: "2-digit",
@@ -94,15 +118,22 @@ export async function POST(request: NextRequest) {
     year: "numeric",
   });
   const systemPrompt = buildSystemPrompt(coursesContext, today);
+  console.log("[chat] system prompt length:", systemPrompt.length);
 
-  // Initialize Supabase here — cookies() only works during request handling,
-  // not inside ReadableStream callbacks which run after the response starts.
+  // ── Supabase client (must be created before ReadableStream) ──────────────
+  console.log("[chat] step: creating supabase client");
   let supabase: Awaited<ReturnType<typeof createClient>> | null = null;
   try {
     supabase = await createClient();
+    console.log("[chat] supabase client: OK");
   } catch (err) {
     console.error("[chat] Failed to create Supabase client:", err);
   }
+
+  // ── Validate Anthropic key before opening stream ─────────────────────────
+  console.log("[chat] step: validating anthropic key");
+  const anthropicClient = getAnthropic(); // throws here if key missing — caught by top-level
+  console.log("[chat] anthropic client: OK");
 
   const encoder = new TextEncoder();
   let fullResponse = "";
@@ -110,10 +141,9 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        console.log("[chat] Starting Anthropic stream for student:", student_id);
+        console.log("[chat] step: opening anthropic stream, student:", student_id);
 
-        // Use messages.stream() without await — it returns a MessageStream directly
-        const anthropicStream = getAnthropic().messages.stream({
+        const anthropicStream = anthropicClient.messages.stream({
           model: "claude-sonnet-4-6",
           max_tokens: 2048,
           system: systemPrompt,
@@ -134,7 +164,7 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        console.log("[chat] Stream complete, response length:", fullResponse.length);
+        console.log("[chat] stream complete, chars:", fullResponse.length);
 
         const topics = extractTopics(fullResponse);
         const cleanResponse = stripTopics(fullResponse);
@@ -144,9 +174,7 @@ export async function POST(request: NextRequest) {
             { student_id, role: "user", content: message.trim() },
             { student_id, role: "assistant", content: cleanResponse },
           ]);
-          if (msgError) {
-            console.error("[chat] Failed to save messages:", msgError.message);
-          }
+          if (msgError) console.error("[chat] save messages error:", msgError.message);
 
           if (Object.keys(topics).length > 0) {
             const upserts = Object.entries(topics).map(([name, score]) => ({
@@ -158,9 +186,7 @@ export async function POST(request: NextRequest) {
             const { error: topicsError } = await supabase
               .from("topics")
               .upsert(upserts, { onConflict: "student_id,name" });
-            if (topicsError) {
-              console.error("[chat] Failed to upsert topics:", topicsError.message);
-            }
+            if (topicsError) console.error("[chat] upsert topics error:", topicsError.message);
           }
         }
 
@@ -171,11 +197,13 @@ export async function POST(request: NextRequest) {
         );
         controller.close();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error("[chat] Stream error:", message, err);
+        const name    = err instanceof Error ? err.name    : "UnknownError";
+        const msg     = err instanceof Error ? err.message : String(err);
+        const stack   = err instanceof Error ? err.stack   : undefined;
+        console.error("[chat] stream error:", { name, msg, stack });
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "error", text: `Erro: ${message}` })}\n\n`
+            `data: ${JSON.stringify({ type: "error", text: `Erro: ${msg}` })}\n\n`
           )
         );
         controller.close();
