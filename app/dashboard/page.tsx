@@ -1,15 +1,14 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AiSummaryButton } from "@/components/dashboard/AiSummaryButton";
+import { StudyPlanSection, type PlanDay } from "@/components/dashboard/StudyPlanSection";
 import type { Student, Topic, Message } from "@/lib/types";
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function scoreColor(score: number) {
-  if (score >= 70)
-    return { dot: "bg-green-500", badge: "bg-green-50 text-green-700 border-green-100", ring: "#22c55e" };
-  if (score >= 40)
-    return { dot: "bg-yellow-500", badge: "bg-yellow-50 text-yellow-700 border-yellow-100", ring: "#eab308" };
+  if (score >= 70) return { dot: "bg-green-500", badge: "bg-green-50 text-green-700 border-green-100", ring: "#22c55e" };
+  if (score >= 40) return { dot: "bg-yellow-500", badge: "bg-yellow-50 text-yellow-700 border-yellow-100", ring: "#eab308" };
   return { dot: "bg-red-500", badge: "bg-red-50 text-red-700 border-red-100", ring: "#ef4444" };
 }
 
@@ -29,11 +28,7 @@ function initials(name: string): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function calculateStreak(daySet: Set<string>): number {
@@ -49,7 +44,40 @@ function calculateStreak(daySet: Set<string>): number {
   return streak;
 }
 
-// SVG score ring (44×44, radius 18)
+/** Parse structured plan days from an assistant message */
+function parsePlanDays(content: string): PlanDay[] {
+  const days: PlanDay[] = [];
+  // Split on each day marker
+  const blocks = content.split(/(?=📅 \*\*Dia \d+)/);
+
+  for (const block of blocks) {
+    if (!block.startsWith("📅 **Dia")) continue;
+
+    const firstLine = block.split("\n")[0];
+
+    // Match: 📅 **Dia N — [label] (X min)** — Module
+    const headerMatch = firstLine.match(/Dia (\d+)[^(]*\((\d+)\s*min\)\*\*\s*—\s*(.+)/);
+    if (!headerMatch) continue;
+
+    const dateMatch = firstLine.match(/Dia \d+\s*—\s*([^(]+)\(/);
+    const label     = dateMatch ? dateMatch[1].trim() : `Dia ${headerMatch[1]}`;
+
+    const descMatch   = block.match(/→\s*(.+)/);
+    const courseMatch = block.match(/🎓 Curso recomendado:\s*([^—\n]+)/);
+
+    days.push({
+      num        : parseInt(headerMatch[1]),
+      label,
+      duration   : parseInt(headerMatch[2]),
+      module     : headerMatch[3].trim(),
+      description: descMatch?.[1]?.trim(),
+      course     : courseMatch?.[1]?.trim(),
+    });
+  }
+  return days;
+}
+
+// SVG score ring
 function ScoreRing({ score, color }: { score: number; color: string }) {
   const r = 18;
   const circ = 2 * Math.PI * r;
@@ -59,10 +87,8 @@ function ScoreRing({ score, color }: { score: number; color: string }) {
       <svg width="44" height="44" viewBox="0 0 44 44">
         <circle cx="22" cy="22" r={r} fill="none" stroke="#f3f4f6" strokeWidth="3.5" />
         <circle
-          cx="22" cy="22" r={r}
-          fill="none"
-          stroke={color}
-          strokeWidth="3.5"
+          cx="22" cy="22" r={r} fill="none"
+          stroke={color} strokeWidth="3.5"
           strokeDasharray={`${dash.toFixed(1)} ${circ.toFixed(1)}`}
           strokeLinecap="round"
           transform="rotate(-90 22 22)"
@@ -77,29 +103,54 @@ function ScoreRing({ score, color }: { score: number; color: string }) {
 
 // 7-day activity dots
 function ActivityDots({ daySet }: { daySet: Set<string> }) {
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-    return { active: daySet.has(key), label: d.toLocaleDateString("pt-BR", { weekday: "short" }) };
-  });
   return (
-    <div className="flex items-end gap-1">
-      {days.map((day, i) => (
-        <div key={i} className="flex flex-col items-center gap-0.5">
+    <div className="flex items-end gap-0.5">
+      {Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        return (
           <div
-            className={`w-3.5 h-3.5 rounded-sm transition-colors ${
-              day.active ? "bg-blue-500" : "bg-gray-100"
-            }`}
-            title={day.label}
+            key={i}
+            className={`w-3 h-3 rounded-sm ${daySet.has(key) ? "bg-blue-500" : "bg-gray-100"}`}
+            title={d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })}
           />
+        );
+      })}
+    </div>
+  );
+}
+
+// Onboarding progress steps
+function OnboardingSteps({ steps }: { steps: { label: string; done: boolean }[] }) {
+  return (
+    <div className="flex items-center gap-1 py-1 flex-wrap">
+      {steps.map(({ label, done }, i) => (
+        <div key={label} className="flex items-center gap-1">
+          <div className={`flex items-center gap-1 ${done ? "text-green-600" : "text-gray-300"}`}>
+            <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] flex-shrink-0 ${
+              done ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+            }`}>
+              {done ? (
+                <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="2 6 5 9 10 3" />
+                </svg>
+              ) : (
+                <span className="text-[8px] font-medium">{i + 1}</span>
+              )}
+            </div>
+            <span className={`text-[9px] font-medium ${done ? "text-green-700" : "text-gray-400"}`}>{label}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <div className={`w-4 h-px flex-shrink-0 ${done ? "bg-green-200" : "bg-gray-100"}`} />
+          )}
         </div>
       ))}
     </div>
   );
 }
 
-// ─── page ─────────────────────────────────────────────────────────────────────
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export const dynamic = "force-dynamic";
 
@@ -117,28 +168,20 @@ export default async function DashboardPage({
   const supabase = await createClient();
 
   const studentsQuery = supabase
-    .from("students")
-    .select("id, name, email, whatsapp, created_at")
+    .from("students").select("id, name, email, whatsapp, created_at")
     .order("created_at", { ascending: false });
   if (filterStudentId) studentsQuery.eq("id", filterStudentId);
 
-  const topicsQuery = supabase
-    .from("topics")
-    .select("id, student_id, name, score, updated_at");
+  const topicsQuery = supabase.from("topics").select("id, student_id, name, score, updated_at");
   if (filterStudentId) topicsQuery.eq("student_id", filterStudentId);
 
   const messagesQuery = supabase
-    .from("messages")
-    .select("student_id, role, content, created_at")
+    .from("messages").select("student_id, role, content, created_at")
     .order("created_at", { ascending: false })
     .limit(filterStudentId ? 500 : 3000);
   if (filterStudentId) messagesQuery.eq("student_id", filterStudentId);
 
-  const [studentsRes, topicsRes, messagesRes] = await Promise.all([
-    studentsQuery,
-    topicsQuery,
-    messagesQuery,
-  ]);
+  const [studentsRes, topicsRes, messagesRes] = await Promise.all([studentsQuery, topicsQuery, messagesQuery]);
 
   let lessonViews: LessonView[] = [];
   try {
@@ -151,13 +194,13 @@ export default async function DashboardPage({
   const messages             = (messagesRes.data ?? []) as Msg[];
 
   // ── Aggregate ────────────────────────────────────────────────────────────────
-
-  const topicsByStudent   = new Map<string, Topic[]>();
-  const msgCountByStudent = new Map<string, number>();
-  const lastMsgByStudent  = new Map<string, Msg>();
-  const daysByStudent     = new Map<string, Set<string>>();
-  const objectiveByStudent= new Map<string, string>();
-  const hasPlanByStudent  = new Map<string, boolean>();
+  const topicsByStudent    = new Map<string, Topic[]>();
+  const msgCountByStudent  = new Map<string, number>();
+  const lastMsgByStudent   = new Map<string, Msg>();
+  const daysByStudent      = new Map<string, Set<string>>();
+  const objectiveByStudent = new Map<string, string>();
+  const hasPlanByStudent   = new Map<string, boolean>();
+  const planMsgByStudent   = new Map<string, string>();
 
   for (const t of topics) {
     const arr = topicsByStudent.get(t.student_id) ?? [];
@@ -168,11 +211,19 @@ export default async function DashboardPage({
   for (const m of messages) {
     msgCountByStudent.set(m.student_id, (msgCountByStudent.get(m.student_id) ?? 0) + 1);
     if (!lastMsgByStudent.has(m.student_id)) lastMsgByStudent.set(m.student_id, m);
+
     if (!daysByStudent.has(m.student_id)) daysByStudent.set(m.student_id, new Set());
     const d = new Date(m.created_at);
     daysByStudent.get(m.student_id)!.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+
     if (m.role === "user" && m.content.length > 30) objectiveByStudent.set(m.student_id, m.content);
-    if (m.role === "assistant" && m.content.includes("Seu plano de estudos")) hasPlanByStudent.set(m.student_id, true);
+
+    if (m.role === "assistant") {
+      if (m.content.includes("Seu plano de estudos") || m.content.includes("📅 **Dia")) {
+        hasPlanByStudent.set(m.student_id, true);
+        if (!planMsgByStudent.has(m.student_id)) planMsgByStudent.set(m.student_id, m.content);
+      }
+    }
   }
 
   const lessonsByStudent = new Map<string, number>();
@@ -180,24 +231,20 @@ export default async function DashboardPage({
     lessonsByStudent.set(lv.student_id, (lessonsByStudent.get(lv.student_id) ?? 0) + 1);
   }
 
-  const totalStudents  = students.length;
-  const totalTopics    = topics.length;
-  const totalMessages  = messages.length;
-  const totalLessons   = lessonViews.length;
+  const totalStudents = students.length;
+  const totalTopics   = topics.length;
+  const totalMessages = messages.length;
+  const totalLessons  = lessonViews.length;
 
-  // Global avg score (admin view)
   const globalAvg = topics.length > 0
-    ? Math.round(topics.reduce((s, t) => s + t.score, 0) / topics.length)
-    : null;
-
-  // Active students today
+    ? Math.round(topics.reduce((s, t) => s + t.score, 0) / topics.length) : null;
   const todayKey = (() => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; })();
   const activeToday = [...daysByStudent.values()].filter((s) => s.has(todayKey)).length;
 
   return (
     <div className="min-h-screen bg-[#F7F8FA]">
 
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      {/* ── Header ────────────────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-gray-100 px-6 py-5 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto flex items-center justify-between flex-wrap gap-4">
           <div>
@@ -226,10 +273,10 @@ export default async function DashboardPage({
           {!isStudentView && (
             <div className="flex items-center gap-5">
               {[
-                { value: totalStudents,  label: "Alunos",           color: "text-blue-600"  },
-                { value: totalTopics,    label: "Tópicos",          color: "text-purple-600"},
-                { value: totalMessages,  label: "Mensagens",        color: "text-green-600" },
-                { value: totalLessons,   label: "Aulas assistidas", color: "text-orange-600"},
+                { value: totalStudents, label: "Alunos",           color: "text-blue-600"   },
+                { value: totalTopics,   label: "Tópicos",          color: "text-purple-600" },
+                { value: totalMessages, label: "Mensagens",        color: "text-green-600"  },
+                { value: totalLessons,  label: "Aulas assistidas", color: "text-orange-600" },
               ].map(({ value, label, color }, i, arr) => (
                 <div key={label} className="flex items-center gap-5">
                   <div className="text-center">
@@ -244,7 +291,7 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* ── Student grid ────────────────────────────────────────────────────── */}
+      {/* ── Grid ──────────────────────────────────────────────────────────────── */}
       <div className="max-w-6xl mx-auto px-6 py-8">
         {students.length === 0 ? (
           <div className="text-center py-24">
@@ -252,8 +299,7 @@ export default async function DashboardPage({
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-gray-400">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                 <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
             </div>
             <p className="text-sm text-gray-400">Nenhum aluno cadastrado ainda.</p>
@@ -261,21 +307,25 @@ export default async function DashboardPage({
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {students.map((student) => {
-              const studentTopics = (topicsByStudent.get(student.id) ?? []).sort(
-                (a, b) => b.score - a.score
-              );
-              const lastMsg    = lastMsgByStudent.get(student.id);
-              const msgCount   = msgCountByStudent.get(student.id) ?? 0;
-              const lessonCount= lessonsByStudent.get(student.id) ?? 0;
-              const daySet     = daysByStudent.get(student.id) ?? new Set<string>();
-              const streak     = calculateStreak(daySet);
-              const objective  = objectiveByStudent.get(student.id);
-              const hasPlan    = hasPlanByStudent.get(student.id) ?? false;
+              const studentTopics = (topicsByStudent.get(student.id) ?? []).sort((a, b) => b.score - a.score);
+              const lastMsg       = lastMsgByStudent.get(student.id);
+              const msgCount      = msgCountByStudent.get(student.id) ?? 0;
+              const lessonCount   = lessonsByStudent.get(student.id) ?? 0;
+              const daySet        = daysByStudent.get(student.id) ?? new Set<string>();
+              const streak        = calculateStreak(daySet);
+              const objective     = objectiveByStudent.get(student.id);
+              const hasPlan       = hasPlanByStudent.get(student.id) ?? false;
+              const planMsg       = planMsgByStudent.get(student.id);
+              const planDays      = planMsg ? parsePlanDays(planMsg) : [];
 
-              const avgScore =
-                studentTopics.length > 0
-                  ? Math.round(studentTopics.reduce((s, t) => s + t.score, 0) / studentTopics.length)
-                  : null;
+              // Topic categories
+              const gaps       = studentTopics.filter((t) => t.score < 40);
+              const inProgress = studentTopics.filter((t) => t.score >= 40 && t.score < 70);
+              const mastered   = studentTopics.filter((t) => t.score >= 70);
+
+              const avgScore = studentTopics.length > 0
+                ? Math.round(studentTopics.reduce((s, t) => s + t.score, 0) / studentTopics.length)
+                : null;
 
               const ringColor = avgScore === null ? "#d1d5db"
                 : avgScore >= 70 ? "#22c55e"
@@ -287,13 +337,21 @@ export default async function DashboardPage({
                 : avgScore >= 40 ? "border-yellow-400"
                 : "border-red-400";
 
+              // Onboarding steps
+              const onboardingSteps = [
+                { label: "Cadastro",    done: true },
+                { label: "Objetivo",    done: !!objective },
+                { label: "Diagnóstico", done: studentTopics.length > 0 },
+                { label: "Plano",       done: hasPlan },
+              ];
+
               return (
                 <div
                   key={student.id}
                   className={`bg-white rounded-2xl border-t-2 ${accentBorder} border-l border-r border-b border-gray-100 shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_20px_rgba(0,0,0,0.09)] transition-all duration-200 overflow-hidden`}
                 >
-                  {/* Identity header */}
-                  <div className="px-5 pt-5 pb-4 flex items-start gap-3 border-b border-gray-50">
+                  {/* ── Identity ──────────────────────────── */}
+                  <div className="px-5 pt-5 pb-3 flex items-start gap-3 border-b border-gray-50">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-sm">
                       {initials(student.name)}
                     </div>
@@ -302,28 +360,28 @@ export default async function DashboardPage({
                       <p className="text-xs text-gray-400 truncate">{student.email}</p>
                       <p className="text-xs text-gray-300 mt-0.5">Desde {formatDate(student.created_at)}</p>
                     </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      {hasPlan && (
-                        <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium border border-blue-100">
-                          Plano gerado
-                        </span>
-                      )}
-                      {lastMsg && (
-                        <span className="text-xs text-gray-300">{timeAgo(lastMsg.created_at)}</span>
-                      )}
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      {lastMsg && <span className="text-xs text-gray-300">{timeAgo(lastMsg.created_at)}</span>}
                     </div>
                   </div>
 
                   <div className="px-5 py-4 flex flex-col gap-4">
-                    {/* Objective */}
+
+                    {/* ── Onboarding progress ───────────────── */}
+                    <div>
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Progresso de Onboarding</p>
+                      <OnboardingSteps steps={onboardingSteps} />
+                    </div>
+
+                    {/* ── Objective ─────────────────────────── */}
                     {objective && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-400 mb-1">Objetivo</p>
+                      <div className="bg-gray-50 rounded-xl px-3 py-2.5">
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">🎯 Objetivo</p>
                         <p className="text-xs text-gray-600 leading-relaxed line-clamp-2">{objective}</p>
                       </div>
                     )}
 
-                    {/* Score ring + activity */}
+                    {/* ── Score ring + activity ─────────────── */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         {avgScore !== null ? (
@@ -331,25 +389,23 @@ export default async function DashboardPage({
                             <ScoreRing score={avgScore} color={ringColor} />
                             <div>
                               <p className="text-xs font-medium text-gray-700">Domínio médio</p>
-                              <p className="text-xs text-gray-400">{studentTopics.length} tópico{studentTopics.length !== 1 ? "s" : ""} estudado{studentTopics.length !== 1 ? "s" : ""}</p>
+                              <p className="text-xs text-gray-400">{studentTopics.length} tópico{studentTopics.length !== 1 ? "s" : ""}</p>
                             </div>
                           </>
                         ) : (
-                          <p className="text-xs text-gray-400 italic">Sem tópicos avaliados ainda</p>
+                          <p className="text-xs text-gray-400 italic">Sem tópicos ainda</p>
                         )}
                       </div>
-
-                      {/* 7-day activity */}
                       <div className="flex flex-col items-end gap-1">
-                        <p className="text-[10px] text-gray-300 font-medium">7 dias</p>
+                        <p className="text-[9px] text-gray-300 font-medium">últimos 7 dias</p>
                         <ActivityDots daySet={daySet} />
                       </div>
                     </div>
 
-                    {/* Stats row */}
+                    {/* ── Stats ─────────────────────────────── */}
                     <div className="flex gap-2">
                       {[
-                        { icon: "💬", value: msgCount,   label: "msgs"  },
+                        { icon: "💬", value: msgCount,    label: "msgs"  },
                         { icon: "🎓", value: lessonCount, label: "aulas" },
                         { icon: "🔥", value: streak,      label: streak === 1 ? "dia" : "dias" },
                       ].map(({ icon, value, label }) => (
@@ -360,52 +416,79 @@ export default async function DashboardPage({
                       ))}
                     </div>
 
-                    {/* Topics */}
+                    {/* ── Diagnóstico de lacunas ────────────── */}
                     {studentTopics.length > 0 && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-400 mb-2">
-                          Tópicos ({studentTopics.length})
+                      <div className="rounded-xl border border-gray-100 p-3">
+                        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                          <span>📌</span> Diagnóstico de lacunas
                         </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {studentTopics.slice(0, 6).map((t) => {
-                            const { dot, badge } = scoreColor(t.score);
-                            return (
-                              <span
-                                key={t.id}
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium border ${badge}`}
-                                title={`${t.name}: ${t.score}/100`}
-                              >
-                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-                                {t.name}
-                                <span className="opacity-50 text-[10px]">{t.score}</span>
-                              </span>
-                            );
-                          })}
-                          {studentTopics.length > 6 && (
-                            <span className="text-xs text-gray-400 self-center">+{studentTopics.length - 6}</span>
+                        <div className="flex flex-col gap-2">
+                          {gaps.length > 0 && (
+                            <div>
+                              <p className="text-[9px] text-red-500 font-semibold mb-1 uppercase tracking-wide">
+                                ● Precisa aprender ({gaps.length})
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {gaps.slice(0, 4).map((t) => (
+                                  <span key={t.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-red-50 text-red-700 border border-red-100">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                                    {t.name} <span className="opacity-50">{t.score}</span>
+                                  </span>
+                                ))}
+                                {gaps.length > 4 && <span className="text-[10px] text-gray-400">+{gaps.length - 4}</span>}
+                              </div>
+                            </div>
+                          )}
+                          {inProgress.length > 0 && (
+                            <div>
+                              <p className="text-[9px] text-yellow-600 font-semibold mb-1 uppercase tracking-wide">
+                                ● Em progresso ({inProgress.length})
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {inProgress.slice(0, 4).map((t) => (
+                                  <span key={t.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-yellow-50 text-yellow-700 border border-yellow-100">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" />
+                                    {t.name} <span className="opacity-50">{t.score}</span>
+                                  </span>
+                                ))}
+                                {inProgress.length > 4 && <span className="text-[10px] text-gray-400">+{inProgress.length - 4}</span>}
+                              </div>
+                            </div>
+                          )}
+                          {mastered.length > 0 && (
+                            <div>
+                              <p className="text-[9px] text-green-600 font-semibold mb-1 uppercase tracking-wide">
+                                ● Domina ({mastered.length})
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {mastered.slice(0, 4).map((t) => (
+                                  <span key={t.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-green-50 text-green-700 border border-green-100">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
+                                    {t.name} <span className="opacity-50">{t.score}</span>
+                                  </span>
+                                ))}
+                                {mastered.length > 4 && <span className="text-[10px] text-gray-400">+{mastered.length - 4}</span>}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
                     )}
 
-                    {/* Last message */}
-                    {lastMsg && (
-                      <div className="border-t border-gray-50 pt-3 -mb-0.5">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-gray-400">
-                            Última mensagem ·{" "}
-                            <span className={lastMsg.role === "user" ? "text-blue-500" : "text-gray-400"}>
-                              {lastMsg.role === "user" ? "aluno" : "Theo"}
-                            </span>
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
-                          {lastMsg.content.slice(0, 140)}{lastMsg.content.length > 140 ? "…" : ""}
-                        </p>
+                    {/* ── Study plan ────────────────────────── */}
+                    {hasPlan && (
+                      <StudyPlanSection days={planDays} />
+                    )}
+
+                    {/* ── No plan yet placeholder ───────────── */}
+                    {!hasPlan && objective && (
+                      <div className="border border-dashed border-gray-200 rounded-xl px-3 py-2.5 text-center">
+                        <p className="text-xs text-gray-400">📅 Plano de estudos ainda não gerado</p>
+                        <p className="text-[10px] text-gray-300 mt-0.5">O Theo gerará o plano após o diagnóstico</p>
                       </div>
                     )}
 
-                    {/* AI Summary button */}
+                    {/* ── AI Summary ────────────────────────── */}
                     <AiSummaryButton studentId={student.id} />
                   </div>
                 </div>
