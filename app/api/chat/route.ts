@@ -71,15 +71,22 @@ export async function POST(request: NextRequest) {
   ];
 
   // Build a search query from all user messages to find relevant CEFIS courses
-  const allUserText = [
-    ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
-    message.trim(),
-  ].join(" ");
-  const relevantCourses = searchCourses(allUserText, 8);
-  const coursesContext =
-    relevantCourses.length > 0
-      ? formatCoursesForPrompt(relevantCourses, true)
-      : undefined;
+  // Wrapped in try/catch — data/ dir may be absent in deploy (gitignored)
+  let coursesContext: string | undefined;
+  try {
+    const allUserText = [
+      ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
+      message.trim(),
+    ].join(" ");
+    const relevantCourses = searchCourses(allUserText, 8);
+    coursesContext =
+      relevantCourses.length > 0
+        ? formatCoursesForPrompt(relevantCourses, true)
+        : undefined;
+  } catch (err) {
+    console.warn("[chat] Course search failed (data dir absent?), continuing without courses:", err);
+    coursesContext = undefined;
+  }
   const today = new Date().toLocaleDateString("pt-BR", {
     weekday: "long",
     day: "2-digit",

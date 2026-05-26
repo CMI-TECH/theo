@@ -35,7 +35,22 @@ let _cache: CourseDetails[] | null = null;
 function loadAll(): CourseDetails[] {
   if (_cache) return _cache;
 
-  const entries = fs.readdirSync(COURSES_DIR, { withFileTypes: true });
+  // data/ is gitignored — on Vercel (or any deploy without the data dir) return empty gracefully
+  if (!fs.existsSync(COURSES_DIR)) {
+    console.warn("[cefis-courses] data dir not found, running without course catalogue:", COURSES_DIR);
+    _cache = [];
+    return [];
+  }
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(COURSES_DIR, { withFileTypes: true });
+  } catch (err) {
+    console.error("[cefis-courses] Failed to read courses dir:", err);
+    _cache = [];
+    return [];
+  }
+
   const courses: CourseDetails[] = [];
 
   for (const entry of entries) {
