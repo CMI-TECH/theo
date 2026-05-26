@@ -44,9 +44,25 @@ export function ChatPanel({
       {/* Header — never shrinks */}
       <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-gray-100 bg-white">
         <div className="relative flex-shrink-0">
-          <div className="w-9 h-9 rounded-full overflow-hidden bg-white border border-gray-200 shadow-sm">
+          <div className="w-9 h-9 rounded-full overflow-hidden bg-[#0d2137] border border-gray-200 shadow-sm flex items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={CEFIS_LOGO} alt="Theo" className="w-full h-full object-contain" />
+            <img
+              src={CEFIS_LOGO}
+              alt="Theo"
+              className="w-full h-full object-contain p-0.5"
+              onError={(e) => {
+                // Fallback: hide broken img and show initials
+                const el = e.currentTarget;
+                el.style.display = "none";
+                const parent = el.parentElement;
+                if (parent && !parent.querySelector(".logo-fallback")) {
+                  const fb = document.createElement("span");
+                  fb.className = "logo-fallback text-xs font-bold text-blue-600";
+                  fb.textContent = "T";
+                  parent.appendChild(fb);
+                }
+              }}
+            />
           </div>
           <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-white" />
         </div>
