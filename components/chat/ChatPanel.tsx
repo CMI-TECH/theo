@@ -39,6 +39,21 @@ export function ChatPanel({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  // Auto-send message when student clicks "✓ Já assisti" on a LessonCard
+  useEffect(() => {
+    function handleLessonWatched(e: Event) {
+      const { title, course } = (
+        e as CustomEvent<{ title: string; course: string }>
+      ).detail;
+      onSend(
+        `Terminei de assistir a aula "${title}" do curso "${course}". Pode continuar!`
+      );
+    }
+    document.addEventListener("theo:lesson-watched", handleLessonWatched);
+    return () =>
+      document.removeEventListener("theo:lesson-watched", handleLessonWatched);
+  }, [onSend]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header — never shrinks */}

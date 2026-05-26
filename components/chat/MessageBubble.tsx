@@ -123,6 +123,138 @@ function VideoPlayer({
   );
 }
 
+// ─── LessonCard — rich card with video embed + "Já assisti" button ───────────
+
+interface LessonData {
+  url?: string;
+  title: string;
+  course: string;
+  duration?: number;
+  position?: number;
+}
+
+function LessonCard({
+  data,
+  studentId,
+}: {
+  data: LessonData;
+  studentId: string;
+}) {
+  const [open, setOpen]           = useState(false);
+  const [watched, setWatched]     = useState(false);
+  const [videoError, setVideoError] = useState(false);
+  const trackedRef                = useRef(false);
+
+  const durationMin = data.duration ? Math.round(data.duration / 60) : null;
+
+  function handleWatched() {
+    if (watched) return;
+    setWatched(true);
+    document.dispatchEvent(
+      new CustomEvent("theo:lesson-watched", {
+        detail: { title: data.title, course: data.course },
+        bubbles: true,
+      })
+    );
+  }
+
+  return (
+    <div className="my-3 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50/30 overflow-hidden shadow-sm">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="white">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-bold text-blue-900 leading-tight">{data.title}</p>
+          <p className="text-[11px] text-blue-600/80 mt-0.5 truncate">
+            🎓 {data.course}
+            {durationMin ? <span className="text-blue-400 ml-1">· {durationMin} min</span> : null}
+          </p>
+        </div>
+      </div>
+
+      {/* Video player */}
+      {open && data.url && !videoError && (
+        <video
+          controls
+          autoPlay
+          preload="metadata"
+          className="w-full max-h-52 bg-black border-t border-blue-100"
+          onPlay={() => {
+            if (!trackedRef.current && studentId) {
+              trackedRef.current = true;
+              fetch("/api/track-lesson", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  student_id: studentId,
+                  lesson_url: data.url,
+                  lesson_title: data.title,
+                }),
+              }).catch(() => {});
+            }
+          }}
+          onError={() => setVideoError(true)}
+        >
+          <source src={data.url} type="video/mp4" />
+          Seu navegador não suporta vídeo HTML5.
+        </video>
+      )}
+      {open && data.url && videoError && (
+        <div className="px-4 py-3 bg-amber-50 border-t border-amber-100 text-center">
+          <p className="text-xs text-amber-700 mb-2">Não foi possível carregar o vídeo inline.</p>
+          <a
+            href={data.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-semibold text-blue-600 underline hover:text-blue-800"
+          >
+            Abrir aula na CEFIS →
+          </a>
+        </div>
+      )}
+      {open && !data.url && (
+        <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 text-center text-xs text-gray-500">
+          Acesse essa aula diretamente no site da CEFIS.
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex gap-2 px-4 py-2.5 border-t border-blue-100/60">
+        {data.url && (
+          <button
+            type="button"
+            onClick={() => { setOpen((v) => !v); setVideoError(false); }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold text-blue-700 bg-white border border-blue-200 hover:bg-blue-50 transition-colors"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              {open
+                ? <rect x="6" y="6" width="12" height="12" rx="1" />
+                : <polygon points="5 3 19 12 5 21 5 3" />}
+            </svg>
+            {open ? "Minimizar" : "Assistir aula"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleWatched}
+          disabled={watched}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+            watched
+              ? "bg-green-100 text-green-700 border border-green-200 cursor-default"
+              : "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+          }`}
+        >
+          {watched ? "✓ Assisti" : "✓ Já assisti"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── PlayButton ───────────────────────────────────────────────────────────────
 
 function stripMarkdown(text: string): string {
@@ -361,7 +493,8 @@ function parseInline(
 
 // ─── Block renderer ───────────────────────────────────────────────────────────
 
-const CEFIS_VIDEO_RE = /https?:\/\/cdn2\.cefis\.com\.br\/[^\s)]+\.mp4/;
+const CEFIS_VIDEO_RE = /https?:\/\/\S*cefis\S*\.mp4(?:\?\S*)?/;
+const AULA_RE        = /\[AULA:(\{.*\})\]/;
 
 function renderBlocks(content: string, studentId: string): React.ReactNode[] {
   const lines = content.split("\n");
@@ -403,6 +536,22 @@ function renderBlocks(content: string, studentId: string): React.ReactNode[] {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+
+    // Detect [AULA:{...}] blocks — render rich LessonCard
+    const aulaMatch = AULA_RE.exec(line);
+    if (aulaMatch) {
+      flushOl();
+      flushUl();
+      try {
+        const data = JSON.parse(aulaMatch[1]) as LessonData;
+        if (data.title) {
+          blocks.push(<LessonCard key={i} data={data} studentId={studentId} />);
+          continue;
+        }
+      } catch {
+        // malformed JSON — fall through to regular rendering
+      }
+    }
 
     // Detect CEFIS video URL — render inline video player
     const videoMatch = CEFIS_VIDEO_RE.exec(line);

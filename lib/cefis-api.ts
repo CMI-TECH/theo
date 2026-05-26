@@ -128,10 +128,11 @@ export function formatCoursesForPrompt(
       const lessons = lessonsMap.get(c.id) ?? [];
       if (lessons.length > 0) {
         const lessonLines = lessons
-          .slice(0, 5)
+          .slice(0, 20)
           .map((l) => {
+            const dur = l.duration ? ` (${Math.round(l.duration / 60)} min)` : "";
             const url = l.videoUrl ? ` — ${l.videoUrl}` : "";
-            return `    ${l.position}. ${l.title}${url}`;
+            return `    ${l.position}. ${l.title}${dur}${url}`;
           })
           .join("\n");
         line += `\n  Aulas disponíveis:\n${lessonLines}`;
