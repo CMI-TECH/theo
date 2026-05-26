@@ -1,5 +1,5 @@
 // Diagnostic endpoint — visit /api/debug in browser to check all env vars
-// and test the Anthropic connection. REMOVE before going to production.
+// and test connections. REMOVE before going to production.
 export const dynamic = "force-dynamic";
 
 export async function GET() {
@@ -10,6 +10,7 @@ export async function GET() {
     SUPABASE_SECRET_KEY:             process.env.SUPABASE_SECRET_KEY             ? "SET" : "❌ MISSING",
     ELEVENLABS_API_KEY:              process.env.ELEVENLABS_API_KEY              ? "SET" : "❌ MISSING",
     ELEVENLABS_VOICE_ID:             process.env.ELEVENLABS_VOICE_ID             ? "SET" : "❌ MISSING",
+    CEFIS_API_KEY:                   process.env.CEFIS_API_KEY                   ? "SET" : (process.env.CEFIS_EMAIL ? "using CEFIS_EMAIL/PASSWORD" : "❌ MISSING"),
     NODE_ENV:                        process.env.NODE_ENV,
   };
 
@@ -44,10 +45,21 @@ export async function GET() {
     supabaseStatus = `❌ init error: ${err instanceof Error ? err.message : String(err)}`;
   }
 
+  // Test live CEFIS API
+  let cefisStatus = "untested";
+  try {
+    const { pingCefisApi } = await import("@/lib/cefis-api");
+    const result = await pingCefisApi();
+    cefisStatus = result.status;
+  } catch (err) {
+    cefisStatus = `❌ ${err instanceof Error ? err.message : String(err)}`;
+  }
+
   return Response.json({
     env: envCheck,
     anthropic: anthropicStatus,
     supabase: supabaseStatus,
+    cefis: cefisStatus,
     timestamp: new Date().toISOString(),
   });
 }

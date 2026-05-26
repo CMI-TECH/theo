@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 import { createClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { buildSystemPrompt } from "@/lib/theo-system-prompt";
-import { searchCourses, formatCoursesForPrompt } from "@/lib/cefis-courses";
+import { searchCourses, getCourseLessons, formatCoursesForPrompt } from "@/lib/cefis-api";
 import type { ChatMessage } from "@/lib/types";
 
 // Lazy getter — process.env is only resolved at request time in Next.js 16 Turbopack,
@@ -94,20 +94,27 @@ async function handleChat(request: NextRequest) {
     { role: "user" as const, content: message.trim() },
   ];
 
-  // ── Course search (optional — data/ may be absent on deploy) ─────────────
-  console.log("[chat] step: course search");
+  // ── Course search via live CEFIS API ─────────────────────────────────────
+  console.log("[chat] step: course search (live API)");
   let coursesContext: string | undefined;
   try {
-    const allUserText = [
+    const query = [
       ...(history ?? []).filter((m) => m.role === "user").map((m) => m.content),
       message.trim(),
-    ].join(" ");
-    const relevantCourses = searchCourses(allUserText, 8);
-    coursesContext =
-      relevantCourses.length > 0
-        ? formatCoursesForPrompt(relevantCourses, true)
-        : undefined;
-    console.log("[chat] courses found:", relevantCourses.length);
+    ].join(" ").slice(0, 300);
+
+    const courses = await searchCourses(query, 6);
+    console.log("[chat] CEFIS courses found:", courses.length);
+
+    if (courses.length > 0) {
+      // Fetch lessons for the top 3 courses in parallel (to include video URLs)
+      const top = courses.slice(0, 3);
+      const lessonsEntries = await Promise.all(
+        top.map(async (c) => [c.id, await getCourseLessons(c.id)] as const)
+      );
+      const lessonsMap = new Map(lessonsEntries);
+      coursesContext = formatCoursesForPrompt(courses, lessonsMap) || undefined;
+    }
   } catch (err) {
     console.warn("[chat] Course search failed, continuing without courses:", err);
     coursesContext = undefined;
