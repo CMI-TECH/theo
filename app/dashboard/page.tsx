@@ -58,20 +58,38 @@ interface LessonView {
 
 type Msg = Pick<Message, "student_id" | "role" | "content" | "created_at">;
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ id?: string }>;
+}) {
+  const { id: filterStudentId } = await searchParams;
+  const isStudentView = !!filterStudentId;
+
   const supabase = await createClient();
 
+  const studentsQuery = supabase
+    .from("students")
+    .select("id, name, email, whatsapp, created_at")
+    .order("created_at", { ascending: false });
+  if (filterStudentId) studentsQuery.eq("id", filterStudentId);
+
+  const topicsQuery = supabase
+    .from("topics")
+    .select("id, student_id, name, score, updated_at");
+  if (filterStudentId) topicsQuery.eq("student_id", filterStudentId);
+
+  const messagesQuery = supabase
+    .from("messages")
+    .select("student_id, role, content, created_at")
+    .order("created_at", { ascending: false })
+    .limit(filterStudentId ? 500 : 3000);
+  if (filterStudentId) messagesQuery.eq("student_id", filterStudentId);
+
   const [studentsRes, topicsRes, messagesRes] = await Promise.all([
-    supabase
-      .from("students")
-      .select("id, name, email, whatsapp, created_at")
-      .order("created_at", { ascending: false }),
-    supabase.from("topics").select("id, student_id, name, score, updated_at"),
-    supabase
-      .from("messages")
-      .select("student_id, role, content, created_at")
-      .order("created_at", { ascending: false })
-      .limit(3000),
+    studentsQuery,
+    topicsQuery,
+    messagesQuery,
   ]);
 
   let lessonViews: LessonView[] = [];
@@ -151,10 +169,12 @@ export default async function DashboardPage() {
         <div className="max-w-6xl mx-auto flex items-center justify-between flex-wrap gap-4">
           <div>
             <h1 className="text-lg font-semibold text-gray-900 tracking-tight">
-              Dashboard de Alunos
+              {isStudentView ? "Meu Progresso" : "Dashboard de Alunos"}
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
-              Visão geral do progresso
+              {isStudentView
+                ? "Seu histórico de aprendizado com o Theo"
+                : "Visão geral do progresso"}
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -168,7 +188,7 @@ export default async function DashboardPage() {
               Voltar ao chat
             </Link>
           </div>
-          <div className="flex items-center gap-5">
+          {!isStudentView && <div className="flex items-center gap-5">
             {[
               { value: totalStudents, label: "Alunos" },
               { value: totalTopics, label: "Tópicos" },
@@ -185,7 +205,7 @@ export default async function DashboardPage() {
                 )}
               </div>
             ))}
-          </div>
+          </div>}
         </div>
       </div>
 

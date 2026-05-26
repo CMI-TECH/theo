@@ -80,7 +80,7 @@ export function ChatPanel({
           </div>
         )}
         <Link
-          href="/dashboard"
+          href={`/dashboard?id=${studentId}`}
           className="flex-shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-800 text-xs font-medium transition-colors"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
