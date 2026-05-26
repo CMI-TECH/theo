@@ -7,7 +7,7 @@ import { MessageBubble } from "./MessageBubble";
 import { InputBar } from "./InputBar";
 
 const CEFIS_LOGO =
-  "https://fjasnwkpvcpzwapxxhvy.supabase.co/storage/v1/object/public/logo/LOGO%20CREFIS.png";
+  "https://fjasnwkpvcpzwapxxhvy.supabase.co/storage/v1/object/public/logo/logo%2001.png";
 
 interface Props {
   messages: ChatMessage[];
@@ -44,7 +44,7 @@ export function ChatPanel({
       {/* Header — never shrinks */}
       <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-gray-100 bg-white">
         <div className="relative flex-shrink-0">
-          <div className="w-9 h-9 rounded-full overflow-hidden bg-[#0d2137] border border-gray-200 shadow-sm flex items-center justify-center">
+          <div className="w-9 h-9 rounded-full overflow-hidden bg-white border border-gray-200 shadow-sm flex items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={CEFIS_LOGO}
